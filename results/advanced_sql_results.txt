@@ -1,0 +1,472 @@
+CREATE OR REPLACE VIEW vw_order_lines AS
+SELECT od.order_id,
+       o.order_date,
+       o.customer_id,
+       c.name AS customer_name,
+       c.location,
+       od.product_id,
+       p.name AS product_name,
+       p.category,
+       od.quantity,
+       od.price_per_unit,
+       od.quantity * od.price_per_unit AS line_amount
+FROM OrderDetails od
+JOIN Orders o    ON od.order_id = o.order_id
+JOIN Customers c ON o.customer_id = c.customer_id
+JOIN Products p  ON od.product_id = p.product_id
+
+Query OK, 0 rows affected
+
+CREATE OR REPLACE VIEW vw_customer_summary AS
+SELECT c.customer_id,
+       c.name,
+       c.location,
+       COUNT(o.order_id) AS total_orders,
+       COALESCE(SUM(o.total_amount), 0) AS total_spent,
+       ROUND(COALESCE(AVG(o.total_amount), 0), 2) AS avg_order_value,
+       MIN(o.order_date) AS first_order_date,
+       MAX(o.order_date) AS last_order_date
+FROM Customers c
+LEFT JOIN Orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.name, c.location
+
+Query OK, 0 rows affected
+
+CREATE OR REPLACE VIEW vw_monthly_sales AS
+SELECT DATE_FORMAT(order_date, '%Y-%m') AS month,
+       COUNT(order_id) AS total_orders,
+       COUNT(DISTINCT customer_id) AS active_customers,
+       SUM(total_amount) AS total_sales,
+       ROUND(AVG(total_amount), 2) AS avg_order_value
+FROM Orders
+GROUP BY month
+
+Query OK, 0 rows affected
+
+SELECT * FROM vw_monthly_sales ORDER BY month
+
++---------+--------------+------------------+-------------+-----------------+
+| month   | total_orders | active_customers | total_sales | avg_order_value |
++---------+--------------+------------------+-------------+-----------------+
+| 2023-03 |           13 |               11 |   789000.00 |        60692.31 |
+| 2023-04 |           21 |               19 |  1704000.00 |        81142.86 |
+| 2023-05 |           18 |               18 |  1582000.00 |        87888.89 |
+| 2023-06 |           10 |               10 |  1040000.00 |       104000.00 |
+| 2023-07 |           26 |               19 |  2568000.00 |        98769.23 |
+| 2023-08 |           16 |               15 |  1800000.00 |       112500.00 |
+| 2023-09 |           24 |               22 |  2927000.00 |       121958.33 |
+| 2023-10 |           18 |               17 |  1497000.00 |        83166.67 |
+| 2023-11 |           12 |               10 |  1151000.00 |        95916.67 |
+| 2023-12 |           21 |               20 |  2774000.00 |       132095.24 |
+| 2024-01 |           12 |               11 |  1555000.00 |       129583.33 |
+| 2024-02 |            9 |                9 |   396000.00 |        44000.00 |
++---------+--------------+------------------+-------------+-----------------+
+12 rows in set
+
+SELECT * FROM vw_customer_summary ORDER BY total_spent DESC LIMIT 10
+
++-------------+---------------+-----------+--------------+-------------+-----------------+------------------+-----------------+
+| customer_id | name          | location  | total_orders | total_spent | avg_order_value | first_order_date | last_order_date |
++-------------+---------------+-----------+--------------+-------------+-----------------+------------------+-----------------+
+|          32 | Romil Bora    | Chennai   |            6 |   889000.00 |       148166.67 | 2023-06-06       | 2023-11-24      |
+|          17 | Rhea Issac    | Jaipur    |            4 |   864000.00 |       216000.00 | 2023-04-07       | 2024-01-03      |
+|          51 | Indrans Lanka | Lucknow   |            5 |   713000.00 |       142600.00 | 2023-07-01       | 2024-02-24      |
+|          24 | Samar Sharaf  | Mumbai    |            4 |   693000.00 |       173250.00 | 2023-08-06       | 2024-01-19      |
+|         100 | Kimaya Sur    | Bangalore |            3 |   613000.00 |       204333.33 | 2023-08-07       | 2023-11-01      |
+|          57 | Diya Upadhyay | Kolkata   |            8 |   594000.00 |        74250.00 | 2023-03-29       | 2023-12-12      |
+|          84 | Gokul Chhabra | Delhi     |            5 |   592000.00 |       118400.00 | 2023-04-23       | 2023-12-14      |
+|          78 | Yuvraj  Bir   | Chennai   |            4 |   562000.00 |       140500.00 | 2023-06-02       | 2024-01-07      |
+|          41 | Ehsaan Chand  | Hyderabad |            4 |   558000.00 |       139500.00 | 2023-07-10       | 2024-01-21      |
+|          95 | Kartik Bhakta | Ahmedabad |            3 |   463000.00 |       154333.33 | 2023-07-19       | 2023-12-24      |
++-------------+---------------+-----------+--------------+-------------+-----------------+------------------+-----------------+
+10 rows in set
+
+DROP PROCEDURE IF EXISTS sp_customer_report
+
+Query OK, 0 rows affected
+
+DROP PROCEDURE IF EXISTS sp_top_products_by_month
+
+Query OK, 0 rows affected
+
+DROP PROCEDURE IF EXISTS sp_city_report
+
+Query OK, 0 rows affected
+
+CREATE PROCEDURE sp_customer_report(IN p_customer_id INT)
+BEGIN
+    SELECT *
+    FROM vw_customer_summary
+    WHERE customer_id = p_customer_id;
+
+    SELECT order_id, order_date, product_name, category, quantity, line_amount
+    FROM vw_order_lines
+    WHERE customer_id = p_customer_id
+    ORDER BY order_date, order_id;
+END
+
+Query OK, 0 rows affected
+
+CREATE PROCEDURE sp_top_products_by_month(IN p_month CHAR(7), IN p_limit INT)
+BEGIN
+    SELECT product_name,
+           category,
+           SUM(quantity) AS units_sold,
+           SUM(line_amount) AS revenue
+    FROM vw_order_lines
+    WHERE DATE_FORMAT(order_date, '%Y-%m') = p_month
+    GROUP BY product_name, category
+    ORDER BY revenue DESC
+    LIMIT p_limit;
+END
+
+Query OK, 0 rows affected
+
+CREATE PROCEDURE sp_city_report(IN p_city VARCHAR(50))
+BEGIN
+    SELECT location,
+           COUNT(*) AS total_customers,
+           SUM(total_orders > 0) AS buying_customers,
+           SUM(total_orders) AS total_orders,
+           SUM(total_spent) AS total_revenue
+    FROM vw_customer_summary
+    WHERE location = p_city
+    GROUP BY location;
+
+    SELECT category,
+           SUM(quantity) AS units_sold,
+           SUM(line_amount) AS revenue
+    FROM vw_order_lines
+    WHERE location = p_city
+    GROUP BY category
+    ORDER BY revenue DESC;
+END
+
+Query OK, 0 rows affected
+
+CALL sp_customer_report(32)
+
++-------------+------------+----------+--------------+-------------+-----------------+------------------+-----------------+
+| customer_id | name       | location | total_orders | total_spent | avg_order_value | first_order_date | last_order_date |
++-------------+------------+----------+--------------+-------------+-----------------+------------------+-----------------+
+|          32 | Romil Bora | Chennai  |            6 |   889000.00 |       148166.67 | 2023-06-06       | 2023-11-24      |
++-------------+------------+----------+--------------+-------------+-----------------+------------------+-----------------+
+1 row in set
+
++----------+------------+----------------------------+---------------+----------+-------------+
+| order_id | order_date | product_name               | category      | quantity | line_amount |
++----------+------------+----------------------------+---------------+----------+-------------+
+|      172 | 2023-06-06 | Portable Bluetooth Speaker | Electronics   |        3 |    21000.00 |
+|      172 | 2023-06-06 | Smartwatch Fitness Tracker | Wearable Tech |        1 |     5000.00 |
+|      172 | 2023-06-06 | Digital SLR Camera         | Photography   |        1 |    40000.00 |
+|      105 | 2023-07-03 | Bluetooth Headphones       | Electronics   |        2 |    16000.00 |
+|      105 | 2023-07-03 | Smartphone 6"              | Electronics   |        1 |    15000.00 |
+|      105 | 2023-07-03 | Wireless Earbuds           | Wearable Tech |        2 |     6000.00 |
+|      105 | 2023-07-03 | Wireless Earbuds           | Wearable Tech |        3 |     9000.00 |
+|      195 | 2023-07-13 | Laptop 15" Pro             | Electronics   |        3 |   180000.00 |
+|      195 | 2023-07-13 | Bluetooth Headphones       | Electronics   |        2 |    16000.00 |
+|      195 | 2023-07-13 | E-Book Reader              | Electronics   |        3 |    36000.00 |
+|      164 | 2023-11-05 | E-Book Reader              | Electronics   |        3 |    36000.00 |
+|      164 | 2023-11-05 | Digital SLR Camera         | Photography   |        3 |   120000.00 |
+|      111 | 2023-11-14 | Bluetooth Headphones       | Electronics   |        2 |    16000.00 |
+|      111 | 2023-11-14 | Portable Bluetooth Speaker | Electronics   |        3 |    21000.00 |
+|      111 | 2023-11-14 | Portable Bluetooth Speaker | Electronics   |        1 |     7000.00 |
+|      123 | 2023-11-24 | Smartphone 6"              | Electronics   |        3 |    45000.00 |
+|      123 | 2023-11-24 | Laptop 15" Pro             | Electronics   |        3 |   180000.00 |
+|      123 | 2023-11-24 | Laptop 15" Pro             | Electronics   |        2 |   120000.00 |
++----------+------------+----------------------------+---------------+----------+-------------+
+18 rows in set
+
+Query OK, 0 rows affected
+
+CALL sp_top_products_by_month('2023-09', 3)
+
++--------------------+-------------+------------+------------+
+| product_name       | category    | units_sold | revenue    |
++--------------------+-------------+------------+------------+
+| Digital SLR Camera | Photography |         31 | 1240000.00 |
+| Laptop 15" Pro     | Electronics |         14 |  840000.00 |
+| Smartphone 6"      | Electronics |         18 |  270000.00 |
++--------------------+-------------+------------+------------+
+3 rows in set
+
+Query OK, 0 rows affected
+
+CALL sp_city_report('Chennai')
+
++----------+-----------------+------------------+--------------+---------------+
+| location | total_customers | buying_customers | total_orders | total_revenue |
++----------+-----------------+------------------+--------------+---------------+
+| Chennai  |              15 |               13 |           34 |    3890000.00 |
++----------+-----------------+------------------+--------------+---------------+
+1 row in set
+
++---------------+------------+------------+
+| category      | units_sold | revenue    |
++---------------+------------+------------+
+| Electronics   |        106 | 2578000.00 |
+| Photography   |         28 | 1120000.00 |
+| Wearable Tech |         50 |  192000.00 |
++---------------+------------+------------+
+3 rows in set
+
+Query OK, 0 rows affected
+
+CREATE OR REPLACE VIEW vw_customer_rfm AS
+WITH rfm AS (
+    SELECT customer_id,
+           DATEDIFF((SELECT MAX(order_date) FROM Orders), MAX(order_date)) AS recency_days,
+           COUNT(order_id) AS frequency,
+           SUM(total_amount) AS monetary
+    FROM Orders
+    GROUP BY customer_id
+),
+scored AS (
+    SELECT rfm.*,
+           NTILE(4) OVER (ORDER BY recency_days DESC, customer_id) AS r_score,
+           NTILE(4) OVER (ORDER BY frequency, customer_id)         AS f_score,
+           NTILE(4) OVER (ORDER BY monetary, customer_id)          AS m_score
+    FROM rfm
+)
+SELECT s.customer_id,
+       c.name,
+       c.location,
+       s.recency_days,
+       s.frequency,
+       s.monetary,
+       s.r_score,
+       s.f_score,
+       s.m_score,
+       CONCAT(s.r_score, s.f_score, s.m_score) AS rfm_code,
+       CASE
+           WHEN s.r_score >= 3 AND s.f_score >= 3 AND s.m_score >= 3 THEN 'Champions'
+           WHEN s.r_score >= 3 AND s.f_score >= 2                   THEN 'Loyal / Potential'
+           WHEN s.r_score <= 2 AND s.f_score >= 3                   THEN 'At Risk'
+           WHEN s.r_score = 1                                       THEN 'Lost'
+           ELSE 'Needs Attention'
+       END AS rfm_segment
+FROM scored s
+JOIN Customers c ON s.customer_id = c.customer_id
+
+Query OK, 0 rows affected
+
+SELECT * FROM vw_customer_rfm ORDER BY monetary DESC
+
++-------------+---------------------+-----------+--------------+-----------+-----------+---------+---------+---------+----------+-------------------+
+| customer_id | name                | location  | recency_days | frequency | monetary  | r_score | f_score | m_score | rfm_code | rfm_segment       |
++-------------+---------------------+-----------+--------------+-----------+-----------+---------+---------+---------+----------+-------------------+
+|          32 | Romil Bora          | Chennai   |           92 |         6 | 889000.00 |       3 |       4 |       4 | 344      | Champions         |
+|          17 | Rhea Issac          | Jaipur    |           52 |         4 | 864000.00 |       4 |       4 |       4 | 444      | Champions         |
+|          51 | Indrans Lanka       | Lucknow   |            0 |         5 | 713000.00 |       4 |       4 |       4 | 444      | Champions         |
+|          24 | Samar Sharaf        | Mumbai    |           36 |         4 | 693000.00 |       4 |       4 |       4 | 444      | Champions         |
+|         100 | Kimaya Sur          | Bangalore |          115 |         3 | 613000.00 |       3 |       4 |       4 | 344      | Champions         |
+|          57 | Diya Upadhyay       | Kolkata   |           74 |         8 | 594000.00 |       3 |       4 |       4 | 344      | Champions         |
+|          84 | Gokul Chhabra       | Delhi     |           72 |         5 | 592000.00 |       3 |       4 |       4 | 344      | Champions         |
+|          78 | Yuvraj  Bir         | Chennai   |           48 |         4 | 562000.00 |       4 |       4 |       4 | 444      | Champions         |
+|          41 | Ehsaan Chand        | Hyderabad |           34 |         4 | 558000.00 |       4 |       4 |       4 | 444      | Champions         |
+|          95 | Kartik Bhakta       | Ahmedabad |           62 |         3 | 463000.00 |       3 |       4 |       4 | 344      | Champions         |
+|          35 | Miraya Mand         | Chennai   |          124 |         2 | 463000.00 |       2 |       2 |       4 | 224      | Needs Attention   |
+|          59 | Yasmin Mallick      | Bangalore |          191 |         2 | 444000.00 |       1 |       3 |       4 | 134      | At Risk           |
+|           4 | Charvi Balay        | Pune      |           57 |         3 | 444000.00 |       4 |       3 |       4 | 434      | Champions         |
+|          61 | Saksham Buch        | Kolkata   |           69 |         5 | 427000.00 |       3 |       4 |       4 | 344      | Champions         |
+|          38 | Saksham Barman      | Ahmedabad |           58 |         3 | 427000.00 |       4 |       3 |       4 | 434      | Champions         |
+|          36 | Ivana Acharya       | Lucknow   |          150 |         2 | 373000.00 |       2 |       2 |       4 | 224      | Needs Attention   |
+|          88 | Sumer Dora          | Chennai   |            5 |         4 | 336000.00 |       4 |       4 |       4 | 444      | Champions         |
+|          19 | Sahil Chaudhary     | Pune      |          222 |         1 | 321000.00 |       1 |       1 |       4 | 114      | Lost              |
+|          85 | Aarna Kurian        | Hyderabad |          137 |         3 | 315000.00 |       2 |       3 |       4 | 234      | At Risk           |
+|          81 | Akarsh Loyal        | Chennai   |          242 |         1 | 313000.00 |       1 |       2 |       4 | 124      | Lost              |
+|          91 | Riya Sagar          | Jaipur    |          150 |         3 | 311000.00 |       2 |       4 |       4 | 244      | At Risk           |
+|          63 | Kiaan Tiwari        | Bangalore |           26 |         3 | 301000.00 |       4 |       3 |       3 | 433      | Champions         |
+|          68 | Ayesha Wali         | Chennai   |           37 |         5 | 290000.00 |       4 |       4 |       3 | 443      | Champions         |
+|          92 | Nitya Viswanathan   | Hyderabad |           25 |         3 | 272000.00 |       4 |       4 |       3 | 443      | Champions         |
+|          99 | Jayant Kade         | Mumbai    |           93 |         2 | 269000.00 |       3 |       3 |       3 | 333      | Champions         |
+|          26 | Anvi Atwal          | Kolkata   |          151 |         2 | 261000.00 |       2 |       2 |       3 | 223      | Needs Attention   |
+|          46 | Kismat Bajwa        | Delhi     |           66 |         1 | 260000.00 |       3 |       1 |       3 | 313      | Needs Attention   |
+|          98 | Aniruddh Arya       | Jaipur    |           97 |         3 | 246000.00 |       3 |       4 |       3 | 343      | Champions         |
+|          11 | Tanya Baria         | Lucknow   |           47 |         5 | 242000.00 |       4 |       4 |       3 | 443      | Champions         |
+|          33 | Jayan Bhatti        | Bangalore |          148 |         2 | 236000.00 |       2 |       2 |       3 | 223      | Needs Attention   |
+|          22 | Hiran Deo           | Ahmedabad |          151 |         3 | 235000.00 |       2 |       3 |       3 | 233      | At Risk           |
+|          72 | Ela Kade            | Hyderabad |          155 |         3 | 225000.00 |       2 |       3 |       3 | 233      | At Risk           |
+|          64 | Jayan Loke          | Chennai   |          153 |         1 | 224000.00 |       2 |       1 |       3 | 213      | Needs Attention   |
+|          76 | Rania Chokshi       | Kolkata   |          112 |         2 | 220000.00 |       3 |       3 |       3 | 333      | Champions         |
+|           2 | Charvi Kibe         | Chennai   |          175 |         2 | 219000.00 |       2 |       2 |       3 | 223      | Needs Attention   |
+|          52 | Khushi Goswami      | Kolkata   |            6 |         3 | 218000.00 |       4 |       3 |       3 | 433      | Champions         |
+|          28 | Emir Brahmbhatt     | Lucknow   |          116 |         2 | 216000.00 |       3 |       2 |       3 | 323      | Loyal / Potential |
+|          54 | Hazel Trivedi       | Delhi     |           89 |         3 | 207000.00 |       3 |       3 |       3 | 333      | Champions         |
+|          49 | Yuvaan Krishnan     | Pune      |          139 |         2 | 206000.00 |       2 |       2 |       3 | 223      | Needs Attention   |
+|          23 | Shayak Chokshi      | Chennai   |          299 |         2 | 201000.00 |       1 |       2 |       3 | 123      | Lost              |
+|          87 | Jayesh Gill         | Chennai   |          257 |         3 | 198000.00 |       1 |       4 |       3 | 143      | At Risk           |
+|          37 | Jayesh Butala       | Delhi     |            7 |         3 | 192000.00 |       4 |       3 |       2 | 432      | Loyal / Potential |
+|          67 | Renee Korpal        | Lucknow   |          150 |         2 | 192000.00 |       2 |       3 |       3 | 233      | At Risk           |
+|          12 | Kismat Sangha       | Kolkata   |          300 |         1 | 185000.00 |       1 |       1 |       2 | 112      | Lost              |
+|          40 | Diya Mallick        | Delhi     |          133 |         2 | 181000.00 |       2 |       2 |       2 | 222      | Needs Attention   |
+|          90 | Anika Kaul          | Lucknow   |          138 |         2 | 180000.00 |       2 |       3 |       2 | 232      | At Risk           |
+|          75 | Ryan Ahluwalia      | Delhi     |           13 |         5 | 179000.00 |       4 |       4 |       2 | 442      | Loyal / Potential |
+|          20 | Shamik Mannan       | Pune      |           73 |         1 | 176000.00 |       3 |       1 |       2 | 312      | Needs Attention   |
+|          14 | Jayant Yohannan     | Lucknow   |           85 |         4 | 175000.00 |       3 |       4 |       2 | 342      | Loyal / Potential |
+|          60 | Ranbir Dewan        | Hyderabad |          160 |         2 | 172000.00 |       2 |       3 |       2 | 232      | At Risk           |
+|          10 | Ahana  Ray          | Ahmedabad |          147 |         3 | 172000.00 |       2 |       3 |       2 | 232      | At Risk           |
+|          34 | Ishaan Walia        | Delhi     |           98 |         1 | 149000.00 |       3 |       1 |       2 | 312      | Needs Attention   |
+|          16 | Adira Bhargava      | Jaipur    |           16 |         3 | 148000.00 |       4 |       3 |       2 | 432      | Loyal / Potential |
+|          29 | Kaira Guha          | Chennai   |          123 |         1 | 145000.00 |       2 |       1 |       2 | 212      | Needs Attention   |
+|          42 | Shlok Dhingra       | Jaipur    |           79 |         1 | 144000.00 |       3 |       1 |       2 | 312      | Needs Attention   |
+|          25 | Miraya Bora         | Ahmedabad |          189 |         2 | 135000.00 |       1 |       2 |       2 | 122      | Lost              |
+|          71 | Nirvi Agate         | Bangalore |           61 |         1 | 128000.00 |       3 |       1 |       2 | 312      | Needs Attention   |
+|          18 | Rasha Sarna         | Jaipur    |          290 |         2 | 128000.00 |       1 |       2 |       2 | 122      | Lost              |
+|          50 | Pari Korpal         | Ahmedabad |          203 |         1 | 124000.00 |       1 |       1 |       2 | 112      | Lost              |
+|          48 | Reyansh Golla       | Jaipur    |           76 |         2 | 124000.00 |       3 |       2 |       2 | 322      | Loyal / Potential |
+|          83 | Ira Madan           | Mumbai    |          288 |         2 | 118000.00 |       1 |       3 |       2 | 132      | At Risk           |
+|          45 | Hunar Rout          | Lucknow   |            3 |         2 | 115000.00 |       4 |       2 |       2 | 422      | Loyal / Potential |
+|          39 | Piya Cheema         | Bangalore |          181 |         2 | 113000.00 |       2 |       2 |       2 | 222      | Needs Attention   |
+|          58 | Shanaya Chakrabarti | Delhi     |           64 |         2 | 104000.00 |       3 |       3 |       1 | 331      | Loyal / Potential |
+|          31 | Hiran Mandal        | Mumbai    |          198 |         1 |  84000.00 |       1 |       1 |       1 | 111      | Lost              |
+|          66 | Ahana  Korpal       | Delhi     |          275 |         2 |  83000.00 |       1 |       3 |       1 | 131      | At Risk           |
+|           5 | Diya Arya           | Pune      |           21 |         2 |  75000.00 |       4 |       2 |       1 | 421      | Loyal / Potential |
+|          94 | Yakshit Mangal      | Pune      |          334 |         2 |  72000.00 |       1 |       3 |       1 | 131      | At Risk           |
+|          86 | Advika Wali         | Jaipur    |           61 |         3 |  69000.00 |       3 |       4 |       1 | 341      | Loyal / Potential |
+|          30 | Hridaan Lala        | Jaipur    |          331 |         1 |  68000.00 |       1 |       1 |       1 | 111      | Lost              |
+|           1 | Ivana Chander       | Delhi     |          130 |         1 |  61000.00 |       2 |       1 |       1 | 211      | Needs Attention   |
+|          13 | Lakshit Walia       | Ahmedabad |          200 |         1 |  46000.00 |       1 |       1 |       1 | 111      | Lost              |
+|          43 | Kavya Tak           | Bangalore |          185 |         1 |  40000.00 |       1 |       1 |       1 | 111      | Lost              |
+|          44 | Vritika Baral       | Hyderabad |          231 |         1 |  35000.00 |       1 |       1 |       1 | 111      | Lost              |
+|          47 | Adah Dara           | Delhi     |           16 |         1 |  33000.00 |       4 |       1 |       1 | 411      | Needs Attention   |
+|          73 | Prisha Tara         | Chennai   |          254 |         1 |  30000.00 |       1 |       2 |       1 | 121      | Lost              |
+|          93 | Yuvaan Dhar         | Pune      |          304 |         1 |  29000.00 |       1 |       2 |       1 | 121      | Lost              |
+|          96 | Veer Vaidya         | Bangalore |           35 |         1 |  24000.00 |       4 |       2 |       1 | 421      | Loyal / Potential |
+|          69 | Miraan Koshy        | Kolkata   |          155 |         1 |  23000.00 |       2 |       1 |       1 | 211      | Needs Attention   |
+|           7 | Myra Dubey          | Chennai   |          106 |         2 |  20000.00 |       3 |       2 |       1 | 321      | Loyal / Potential |
+|          80 | Anika Wali          | Delhi     |          294 |         1 |  15000.00 |       1 |       2 |       1 | 121      | Lost              |
+|          53 | Himmat Dhillon      | Ahmedabad |           45 |         1 |  14000.00 |       4 |       1 |       1 | 411      | Needs Attention   |
+|           9 | Aarna Samra         | Hyderabad |          167 |         1 |  12000.00 |       2 |       1 |       1 | 211      | Needs Attention   |
+|          70 | Dhruv Rajagopal     | Delhi     |          330 |         1 |  10000.00 |       1 |       1 |       1 | 111      | Lost              |
++-------------+---------------------+-----------+--------------+-----------+-----------+---------+---------+---------+----------+-------------------+
+84 rows in set
+
+SELECT rfm_segment,
+       COUNT(*) AS customers,
+       ROUND(AVG(recency_days), 0) AS avg_recency_days,
+       ROUND(AVG(frequency), 2) AS avg_orders,
+       SUM(monetary) AS total_revenue,
+       ROUND(SUM(monetary) * 100.0 / (SELECT SUM(total_amount) FROM Orders), 2) AS revenue_share_pct
+FROM vw_customer_rfm
+GROUP BY rfm_segment
+ORDER BY total_revenue DESC
+
++-------------------+-----------+------------------+------------+---------------+-------------------+
+| rfm_segment       | customers | avg_recency_days | avg_orders | total_revenue | revenue_share_pct |
++-------------------+-----------+------------------+------------+---------------+-------------------+
+| Champions         |        23 |               57 |       3.91 |   10440000.00 |             52.77 |
+| Needs Attention   |        20 |              118 |       1.40 |    3421000.00 |             17.29 |
+| At Risk           |        13 |              195 |       2.46 |    2717000.00 |             13.73 |
+| Lost              |        16 |              255 |       1.19 |    1764000.00 |              8.92 |
+| Loyal / Potential |        12 |               50 |       2.58 |    1441000.00 |              7.28 |
++-------------------+-----------+------------------+------------+---------------+-------------------+
+5 rows in set
+
+WITH first_order AS (
+    SELECT customer_id, MIN(order_date) AS first_order_date
+    FROM Orders
+    GROUP BY customer_id
+),
+activity AS (
+    SELECT DISTINCT
+           DATE_FORMAT(f.first_order_date, '%Y-%m') AS cohort_month,
+           o.customer_id,
+           TIMESTAMPDIFF(MONTH,
+                         DATE_FORMAT(f.first_order_date, '%Y-%m-01'),
+                         DATE_FORMAT(o.order_date, '%Y-%m-01')) AS month_number
+    FROM Orders o
+    JOIN first_order f ON o.customer_id = f.customer_id
+),
+cohort_size AS (
+    SELECT cohort_month, COUNT(DISTINCT customer_id) AS customers
+    FROM activity
+    WHERE month_number = 0
+    GROUP BY cohort_month
+)
+SELECT a.cohort_month,
+       cs.customers AS cohort_size,
+       a.month_number,
+       COUNT(DISTINCT a.customer_id) AS active_customers,
+       ROUND(COUNT(DISTINCT a.customer_id) * 100.0 / cs.customers, 1) AS retention_pct
+FROM activity a
+JOIN cohort_size cs ON a.cohort_month = cs.cohort_month
+GROUP BY a.cohort_month, cs.customers, a.month_number
+ORDER BY a.cohort_month, a.month_number
+
++--------------+-------------+--------------+------------------+---------------+
+| cohort_month | cohort_size | month_number | active_customers | retention_pct |
++--------------+-------------+--------------+------------------+---------------+
+| 2023-03      |          11 |            0 |               11 |         100.0 |
+| 2023-03      |          11 |            1 |                1 |           9.1 |
+| 2023-03      |          11 |            2 |                1 |           9.1 |
+| 2023-03      |          11 |            4 |                3 |          27.3 |
+| 2023-03      |          11 |            6 |                3 |          27.3 |
+| 2023-03      |          11 |            7 |                2 |          18.2 |
+| 2023-03      |          11 |            8 |                2 |          18.2 |
+| 2023-03      |          11 |            9 |                3 |          27.3 |
+| 2023-03      |          11 |           11 |                1 |           9.1 |
+| 2023-04      |          18 |            0 |               18 |         100.0 |
+| 2023-04      |          18 |            1 |                6 |          33.3 |
+| 2023-04      |          18 |            2 |                2 |          11.1 |
+| 2023-04      |          18 |            3 |                3 |          16.7 |
+| 2023-04      |          18 |            4 |                1 |           5.6 |
+| 2023-04      |          18 |            5 |                5 |          27.8 |
+| 2023-04      |          18 |            6 |                2 |          11.1 |
+| 2023-04      |          18 |            7 |                3 |          16.7 |
+| 2023-04      |          18 |            8 |                3 |          16.7 |
+| 2023-04      |          18 |            9 |                2 |          11.1 |
+| 2023-04      |          18 |           10 |                1 |           5.6 |
+| 2023-05      |          11 |            0 |               11 |         100.0 |
+| 2023-05      |          11 |            3 |                3 |          27.3 |
+| 2023-05      |          11 |            4 |                4 |          36.4 |
+| 2023-05      |          11 |            5 |                2 |          18.2 |
+| 2023-05      |          11 |            6 |                1 |           9.1 |
+| 2023-05      |          11 |            7 |                3 |          27.3 |
+| 2023-05      |          11 |            8 |                1 |           9.1 |
+| 2023-06      |           8 |            0 |                8 |         100.0 |
+| 2023-06      |           8 |            1 |                2 |          25.0 |
+| 2023-06      |           8 |            3 |                2 |          25.0 |
+| 2023-06      |           8 |            4 |                2 |          25.0 |
+| 2023-06      |           8 |            5 |                1 |          12.5 |
+| 2023-06      |           8 |            6 |                2 |          25.0 |
+| 2023-06      |           8 |            7 |                2 |          25.0 |
+| 2023-07      |          11 |            0 |               11 |         100.0 |
+| 2023-07      |          11 |            1 |                2 |          18.2 |
+| 2023-07      |          11 |            2 |                1 |           9.1 |
+| 2023-07      |          11 |            3 |                5 |          45.5 |
+| 2023-07      |          11 |            5 |                3 |          27.3 |
+| 2023-07      |          11 |            6 |                3 |          27.3 |
+| 2023-07      |          11 |            7 |                5 |          45.5 |
+| 2023-08      |           9 |            0 |                9 |         100.0 |
+| 2023-08      |           9 |            1 |                2 |          22.2 |
+| 2023-08      |           9 |            2 |                1 |          11.1 |
+| 2023-08      |           9 |            3 |                1 |          11.1 |
+| 2023-08      |           9 |            4 |                1 |          11.1 |
+| 2023-08      |           9 |            5 |                1 |          11.1 |
+| 2023-09      |           5 |            0 |                5 |         100.0 |
+| 2023-09      |           5 |            2 |                1 |          20.0 |
+| 2023-09      |           5 |            5 |                1 |          20.0 |
+| 2023-10      |           3 |            0 |                3 |         100.0 |
+| 2023-10      |           3 |            2 |                1 |          33.3 |
+| 2023-11      |           1 |            0 |                1 |         100.0 |
+| 2023-12      |           4 |            0 |                4 |         100.0 |
+| 2024-01      |           2 |            0 |                2 |         100.0 |
+| 2024-02      |           1 |            0 |                1 |         100.0 |
++--------------+-------------+--------------+------------------+---------------+
+56 rows in set
+
+SELECT COUNT(*) AS buying_customers,
+       SUM(total_orders > 1) AS repeat_customers,
+       ROUND(SUM(total_orders > 1) * 100.0 / COUNT(*), 2) AS repeat_rate_pct
+FROM vw_customer_summary
+WHERE total_orders > 0
+
++------------------+------------------+-----------------+
+| buying_customers | repeat_customers | repeat_rate_pct |
++------------------+------------------+-----------------+
+|               84 |               58 |           69.05 |
++------------------+------------------+-----------------+
+1 row in set
+
+Bye

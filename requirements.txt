@@ -1,0 +1,7 @@
+pandas
+openpyxl
+tabulate
+matplotlib
+nbformat
+nbclient
+ipykernel
